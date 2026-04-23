@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan review</title>
+<style>
+  :root {
+    --bg: #f6f8fa;
+    --fg: #24292f;
+    --muted: #57606a;
+    --border: #d0d7de;
+    --card: #ffffff;
+    --accent: #0969da;
+    --approve: #1f7a3a;
+    --reject: #b42318;
+    --comment-bg: #fff8c5;
+    --comment-border: #eac54f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--fg);
+    background: var(--bg);
+  }
+  .header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .header h1 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    flex: 1;
+  }
+  button {
+    padding: 6px 14px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .btn-approve { background: var(--approve); color: #fff; }
+  .btn-approve:hover:not(:disabled) { filter: brightness(1.1); }
+  .btn-reject { background: var(--reject); color: #fff; }
+  .btn-reject:hover:not(:disabled) { filter: brightness(1.1); }
+  .btn-reject:disabled { background: #d0d7de; color: #8c959f; cursor: not-allowed; }
+  .btn-ghost { background: transparent; color: var(--fg); border-color: var(--border); }
+  .btn-ghost:hover { background: #f3f4f6; }
+  .content { max-width: 920px; margin: 24px auto; padding: 0 20px; }
+  .plan {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 16px;
+  }
+  .block {
+    position: relative;
+    padding: 2px 32px 2px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .block:hover { background: #eef5ff; }
+  .block.has-comment { background: #fff8c5; }
+  .block .add-icon {
+    position: absolute;
+    right: 6px;
+    top: 4px;
+    font-size: 12px;
+    color: var(--accent);
+    opacity: 0;
+    user-select: none;
+  }
+  .block:hover .add-icon { opacity: 1; }
+  .block p:first-child { margin-top: 6px; }
+  .block p:last-child { margin-bottom: 6px; }
+  pre {
+    background: #f6f8fa;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    overflow-x: auto;
+    font-size: 12.5px;
+  }
+  code {
+    background: rgba(175,184,193,0.2);
+    padding: 0.15em 0.35em;
+    border-radius: 4px;
+    font-size: 0.92em;
+  }
+  pre code { background: transparent; padding: 0; }
+  table { border-collapse: collapse; margin: 8px 0; }
+  th, td { border: 1px solid var(--border); padding: 4px 8px; }
+  th { background: #f6f8fa; }
+  blockquote {
+    margin: 8px 0;
+    padding: 4px 12px;
+    border-left: 3px solid var(--border);
+    color: var(--muted);
+  }
+  .comment-box {
+    margin: 8px 0 10px 0;
+    padding: 10px;
+    background: var(--comment-bg);
+    border: 1px solid var(--comment-border);
+    border-radius: 6px;
+    cursor: default;
+  }
+  .comment-box textarea {
+    width: 100%;
+    min-height: 68px;
+    padding: 6px 8px;
+    font: inherit;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    resize: vertical;
+  }
+  .comment-box .actions {
+    margin-top: 8px;
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
+  }
+  .summary {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 18px;
+    margin-top: 24px;
+  }
+  .summary h2 {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .comment-item {
+    padding: 8px 0;
+    border-top: 1px solid #eaeef2;
+  }
+  .comment-item:first-of-type { border-top: 0; }
+  .comment-item .line {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 2px;
+  }
+  .comment-item .text { white-space: pre-wrap; }
+  .comment-item .remove {
+    float: right;
+    font-size: 12px;
+    color: var(--muted);
+    background: none;
+    border: 0;
+    cursor: pointer;
+    padding: 0;
+  }
+  .comment-item .remove:hover { color: var(--reject); }
+  .finished {
+    text-align: center;
+    padding: 80px 20px;
+    color: var(--muted);
+  }
+  .finished h2 { color: var(--fg); margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>Plan review</h1>
+  <button class="btn-ghost" id="btn-reject" disabled>Request changes</button>
+  <button class="btn-approve" id="btn-approve">Approve</button>
+</div>
+<div class="content" id="main">
+  <div class="plan" id="plan">%%RENDERED%%</div>
+  <div class="summary" id="summary" style="display: none;">
+    <h2>Pending comments</h2>
+    <div id="comment-list"></div>
+  </div>
+</div>
+<script>
+  const AUTH_KEY = "%%AUTH_KEY%%";
+  const comments = new Map();
+
+  document.querySelectorAll(".block").forEach((block) => {
+    const icon = document.createElement("span");
+    icon.className = "add-icon";
+    icon.textContent = "+";
+    block.appendChild(icon);
+    block.addEventListener("click", (e) => {
+      if (e.target.closest(".comment-box")) return;
+      openCommentBox(block);
+    });
+  });
+
+  function openCommentBox(block) {
+    if (block.querySelector(".comment-box")) return;
+    const line = block.dataset.line;
+    const existing = comments.get(line) || "";
+    const box = document.createElement("div");
+    box.className = "comment-box";
+    const ta = document.createElement("textarea");
+    ta.placeholder = "Leave a comment on line " + line + "…";
+    ta.value = existing;
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const cancel = document.createElement("button");
+    cancel.className = "btn-ghost";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", () => box.remove());
+    actions.appendChild(cancel);
+    if (existing) {
+      const del = document.createElement("button");
+      del.className = "btn-ghost";
+      del.textContent = "Delete";
+      del.addEventListener("click", () => {
+        comments.delete(line);
+        block.classList.remove("has-comment");
+        box.remove();
+        renderSummary();
+      });
+      actions.appendChild(del);
+    }
+    const save = document.createElement("button");
+    save.className = "btn-approve";
+    save.textContent = "Save";
+    save.addEventListener("click", () => {
+      const text = ta.value.trim();
+      if (text) {
+        comments.set(line, text);
+        block.classList.add("has-comment");
+      } else if (existing) {
+        comments.delete(line);
+        block.classList.remove("has-comment");
+      }
+      box.remove();
+      renderSummary();
+    });
+    actions.appendChild(save);
+    box.appendChild(ta);
+    box.appendChild(actions);
+    block.appendChild(box);
+    ta.focus();
+  }
+
+  function renderSummary() {
+    const summary = document.getElementById("summary");
+    const list = document.getElementById("comment-list");
+    list.innerHTML = "";
+    const entries = [...comments.entries()].sort((a, b) => (+a[0]) - (+b[0]));
+    entries.forEach(([line, text]) => {
+      const item = document.createElement("div");
+      item.className = "comment-item";
+      const remove = document.createElement("button");
+      remove.className = "remove";
+      remove.textContent = "remove";
+      remove.addEventListener("click", () => {
+        comments.delete(line);
+        const block = document.querySelector('.block[data-line="' + line + '"]');
+        if (block) block.classList.remove("has-comment");
+        renderSummary();
+      });
+      const lineEl = document.createElement("div");
+      lineEl.className = "line";
+      lineEl.textContent = "Line " + line;
+      const textEl = document.createElement("div");
+      textEl.className = "text";
+      textEl.textContent = text;
+      item.appendChild(remove);
+      item.appendChild(lineEl);
+      item.appendChild(textEl);
+      list.appendChild(item);
+    });
+    summary.style.display = entries.length === 0 ? "none" : "block";
+    document.getElementById("btn-reject").disabled = entries.length === 0;
+    document.getElementById("btn-reject").className =
+      entries.length === 0 ? "btn-ghost" : "btn-reject";
+  }
+
+  async function submit(action) {
+    if (action === "changes_requested" && comments.size === 0) return;
+    const payload = {
+      action: action,
+      comments: [...comments.entries()].map(([line, text]) => ({
+        line: +line,
+        text: text,
+      })),
+    };
+    const res = await fetch("/submit?key=" + encodeURIComponent(AUTH_KEY), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) {
+      const main = document.getElementById("main");
+      const verb = action === "approved" ? "Approved" : "Changes requested";
+      main.innerHTML =
+        '<div class="finished"><h2>' + verb +
+        "</h2><p>You can close this tab.</p></div>";
+    } else {
+      alert("Submit failed: " + res.status);
+    }
+  }
+
+  document.getElementById("btn-approve").addEventListener("click", () => submit("approved"));
+  document.getElementById("btn-reject").addEventListener("click", () => submit("changes_requested"));
+</script>
+</body>
+</html>

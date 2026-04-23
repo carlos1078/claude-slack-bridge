@@ -1,5 +1,6 @@
 fastmcp
 slack-bolt[async]
 aiohttp
+markdown-it-py
 pydantic-settings
 pytest>=7

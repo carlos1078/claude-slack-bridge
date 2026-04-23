@@ -186,6 +186,66 @@ You can also prompt Claude explicitly:
 
 ---
 
+## The `review_plan` Tool (optional — ngrok)
+
+When Claude has produced a plan and you want a **structured, GitHub-PR-style review** — inline comments per line, plus one button to approve and another to request changes — it can call `review_plan`. The bridge opens a short-lived web UI (fresh `ngrok` tunnel per call), posts the URL to the project's Slack channel, and blocks until you submit.
+
+**Feature flag:** the tool is only registered when `NGROK_AUTHTOKEN` is set in `.env`. No token → no ngrok binary in the image and no tool exposed. This keeps the default image lean for users who don't want the feature.
+
+### One-time setup
+
+1. Grab an authtoken from [the ngrok dashboard](https://dashboard.ngrok.com/get-started/your-authtoken).
+2. Generate a random shared secret used to protect the URL:
+   ```bash
+   openssl rand -hex 32
+   ```
+3. Add both to `.env`:
+   ```env
+   NGROK_AUTHTOKEN=<from ngrok dashboard>
+   REVIEW_AUTH_KEY=<the hex string from step 2>
+   ```
+4. Rebuild the daemon so ngrok gets installed:
+   ```bash
+   docker compose up -d --build
+   ```
+
+Removing the token from `.env` and rebuilding reverts to the lean image — the tool disappears and the ngrok binary is no longer present.
+
+### How a round works
+
+1. Claude calls `review_plan(plan_markdown=...)`.
+2. The session starts a local HTTP server + fresh ngrok tunnel inside the container.
+3. `https://<tunnel>.ngrok-free.app/review?key=<REVIEW_AUTH_KEY>` is posted to `SLACK_CHANNEL`.
+4. You open the URL, click any rendered line to leave a comment, then press **Approve** or **Request changes**.
+5. Claude receives a structured result:
+   ```json
+   {
+     "status": "approved",
+     "comments": []
+   }
+   ```
+   or
+   ```json
+   {
+     "status": "changes_requested",
+     "comments": [
+       {"line": 12, "text": "Use the existing helper instead of a new one."},
+       {"line": 34, "text": "This step should go after the migration."}
+     ]
+   }
+   ```
+6. If you requested changes, Claude revises the plan and calls `review_plan` again — a brand new URL is posted for the new round.
+
+If the tab is closed without submitting, the call times out after `TIMEOUT_LIMIT_MINUTES` (same env var used by `ask_on_slack`).
+
+### Security notes
+
+- The review URL is only valid while the call is in flight; the tunnel is torn down on submit or timeout.
+- `REVIEW_AUTH_KEY` is required on every request, so anyone who sniffs the URL from Slack history still cannot open the page after the round ends.
+- ngrok free-tier limits apply (tunnel count, bandwidth) — fine for personal use.
+
+---
+
 ## Slack → Claude (Project-Aware Bot)
 
 You can also tag the bot directly in Slack to interact with a project. The bot detects which project to use based on the channel.
@@ -327,7 +387,10 @@ claude-slack-two-way/
 │   ├── session.py         # Session entry point — MCP stdio server (docker exec target)
 │   ├── slack_daemon.py    # Slack Socket Mode + Unix socket server
 │   ├── session_broker.py  # Unix socket client — posts message, awaits reply
-│   ├── mcp_server.py      # Registers the ask_on_slack MCP tool
+│   ├── mcp_server.py      # Registers the ask_on_slack + review_plan MCP tools
+│   ├── review_server.py   # ngrok-tunneled aiohttp UI used by review_plan
+│   ├── templates/
+│   │   └── review.html    # Review UI (rendered markdown + inline comments)
 │   └── config.py          # Environment variable validation (pydantic-settings)
 ├── docs/
 │   ├── slack-setup.md        # Step-by-step Slack app creation guide

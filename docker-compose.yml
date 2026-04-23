@@ -1,12 +1,20 @@
 services:
   claude-slack-bridge:
     container_name: claude-slack-bridge
-    build: .
+    build:
+      context: .
+      args:
+        # `${VAR:+1}` expands to "1" when NGROK_AUTHTOKEN is non-empty and to
+        # an empty string otherwise — so setting the token in .env toggles
+        # the ngrok install without any other file changes.
+        INSTALL_NGROK: ${NGROK_AUTHTOKEN:+1}
     env_file:
       - .env
     environment:
       - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
       - SLACK_APP_TOKEN=${SLACK_APP_TOKEN}
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN:-}
+      - REVIEW_AUTH_KEY=${REVIEW_AUTH_KEY:-}
     volumes:
       # Mount Claude CLI credentials (read-only); CLI writes session data inside the container
       - ${HOME}/.claude/.credentials.json:/home/appuser/.claude/.credentials.json:ro
