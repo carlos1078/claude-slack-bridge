@@ -7,9 +7,19 @@ services:
     environment:
       - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
       - SLACK_APP_TOKEN=${SLACK_APP_TOKEN}
+      - GH_TOKEN=${GH_TOKEN}
+    group_add:
+      - "988"
     volumes:
-      # Mount Claude CLI credentials (read-only); CLI writes session data inside the container
-      - ${HOME}/.claude/.credentials.json:/home/appuser/.claude/.credentials.json:ro
+      # Mount the host .claude directory read-only to a separate path; the
+      # entrypoint symlinks .credentials.json from there so the container
+      # always resolves the current inode (atomic host refreshes are invisible
+      # to file bind mounts but not to directory bind mounts).
+      - ${HOME}/.claude:/home/appuser/.claude-host:ro
       # Mount all projects so claude -p can run from the correct project directory
       - ${PROJECTS_DIR}:/projects
+      # Mount projects.json so edits on the host take effect after a restart
+      - ./projects.json:/app/projects.json
+      # Mount host Docker socket so the container can run Docker commands
+      - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped

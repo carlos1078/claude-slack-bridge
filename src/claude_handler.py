@@ -36,7 +36,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-SUBPROCESS_TIMEOUT = 300  # 5 minutes
+SUBPROCESS_TIMEOUT = 900  # 15 minutes
 PROJECTS_CONFIG = Path(__file__).parent.parent / "projects.json"
 
 # Allow Slack's leading bold/italic/strike markers (``*``, ``_``, ``~``)
