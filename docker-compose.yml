@@ -7,7 +7,7 @@ services:
     environment:
       - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
       - SLACK_APP_TOKEN=${SLACK_APP_TOKEN}
-      - GH_TOKEN=${GH_TOKEN}
+      - GH_TOKEN=${GITHUB_TOKEN}
     group_add:
       - "988"
     volumes:
