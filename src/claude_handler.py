@@ -114,11 +114,12 @@ class ClaudeHandler:
         self._sessions: dict[str, str] = {}  # thread_ts → session UUID
         self._project_map: dict[str, Any] = _load_project_map()
         # Resolved at startup: channel ID → {"path": str|None, "plugin_dir": str|None,
-        #                                    "worktrees": dict[str, str]}
+        #                                    "worktrees": dict[str, str],
+        #                                    "github_token": str|None}
         self._channel_id_to_project: dict[str, dict] = {}
-        # thread_ts → (cwd, plugin_dir) chosen when the thread started, so
-        # replies stay in the same worktree without re-tagging.
-        self._thread_config: dict[str, tuple[str | None, str | None]] = {}
+        # thread_ts → (cwd, plugin_dir, github_token) chosen when the thread started,
+        # so replies stay in the same worktree without re-tagging.
+        self._thread_config: dict[str, tuple[str | None, str | None, str | None]] = {}
 
     async def initialize(self) -> None:
         """Cache the bot's own user ID and resolve channel names to IDs."""
@@ -136,15 +137,15 @@ class ClaudeHandler:
     async def handle_message(self, channel: str, message_ts: str, text: str) -> str:
         """Handle a new top-level Slack message (start a new Claude session)."""
         label, text = _parse_worktree_tag(text)
-        project_dir, plugin_dir = self._get_project_config(channel, label)
+        project_dir, plugin_dir, github_token = self._get_project_config(channel, label)
 
         session_id = str(uuid.uuid4())
         self._sessions[message_ts] = session_id
-        self._thread_config[message_ts] = (project_dir, plugin_dir)
+        self._thread_config[message_ts] = (project_dir, plugin_dir, github_token)
         logger.info("New Claude session %s for thread %s", session_id, message_ts)
 
         cmd = self._build_cmd(session_id=session_id, plugin_dir=plugin_dir)
-        return await self._run_claude(cmd, text, cwd=project_dir)
+        return await self._run_claude(cmd, text, cwd=project_dir, github_token=github_token)
 
     async def handle_thread_reply(self, channel: str, thread_ts: str, text: str) -> str:
         """Handle a threaded reply (resume existing session or fallback)."""
@@ -152,18 +153,18 @@ class ClaudeHandler:
         # Thread inherits the worktree chosen at start; re-tagging mid-thread
         # would be confusing, so we don't re-parse here. Falls back to default
         # config only if the thread state was lost (container restart).
-        project_dir, plugin_dir = self._thread_config.get(thread_ts) or self._get_project_config(channel)
+        project_dir, plugin_dir, github_token = self._thread_config.get(thread_ts) or self._get_project_config(channel)
 
         if session_id:
             logger.info("Resuming session %s for thread %s", session_id, thread_ts)
             cmd = self._build_cmd(resume=session_id, plugin_dir=plugin_dir)
-            return await self._run_claude(cmd, text, cwd=project_dir)
+            return await self._run_claude(cmd, text, cwd=project_dir, github_token=github_token)
 
         # Fallback: session lost (container restart) — use thread history as context.
         logger.info("No session for thread %s, falling back to thread history.", thread_ts)
         prompt = await self._build_thread_prompt(channel, thread_ts)
         cmd = self._build_cmd(plugin_dir=plugin_dir)
-        return await self._run_claude(cmd, prompt, cwd=project_dir)
+        return await self._run_claude(cmd, prompt, cwd=project_dir, github_token=github_token)
 
     # ------------------------------------------------------------------
     # Internals
@@ -171,32 +172,33 @@ class ClaudeHandler:
 
     def _get_project_config(
         self, channel_id: str, label: str | None = None
-    ) -> tuple[str | None, str | None]:
-        """Return (project_dir, plugin_dir) for a Slack channel ID.
+    ) -> tuple[str | None, str | None, str | None]:
+        """Return (project_dir, plugin_dir, github_token) for a Slack channel ID.
 
         When *label* is provided and matches a registered worktree for the
         channel, the worktree path is returned instead of the default. An
         unknown label falls back to the default with a warning so messages
         aren't silently dropped.
 
-        Both values are ``None`` when no mapping exists for the channel.
+        All values are ``None`` when no mapping exists for the channel.
         """
         config = self._channel_id_to_project.get(channel_id)
         if not config:
             logger.info("No project mapping for channel %s — using default cwd.", channel_id)
-            return None, None
+            return None, None, None
 
         plugin_dir = config["plugin_dir"]
+        github_token = config.get("github_token")
         worktrees: dict[str, str] = config.get("worktrees", {})
         default_path = config["path"]
 
         if label and label in worktrees:
-            return worktrees[label], plugin_dir
+            return worktrees[label], plugin_dir, github_token
 
         if label and default_path:
             dynamic = _resolve_dynamic_worktree(default_path, label)
             if dynamic:
-                return dynamic, plugin_dir
+                return dynamic, plugin_dir, github_token
 
         path = default_path
         logger.info(
@@ -204,7 +206,7 @@ class ClaudeHandler:
             channel_id, path,
             f" (plugin_dir={plugin_dir})" if plugin_dir else "",
         )
-        return path, plugin_dir
+        return path, plugin_dir, github_token
 
     async def _resolve_channel_ids(self) -> None:
         """Resolve channel names from project_map to Slack channel IDs."""
@@ -223,12 +225,13 @@ class ClaudeHandler:
             for channel_key, value in self._project_map.items():
                 # Normalise the legacy string format and the dict format.
                 if isinstance(value, str):
-                    config = {"path": value, "plugin_dir": None, "worktrees": {}}
+                    config = {"path": value, "plugin_dir": None, "worktrees": {}, "github_token": None}
                 else:
                     config = {
                         "path": value.get("path"),
                         "plugin_dir": value.get("plugin_dir"),
                         "worktrees": value.get("worktrees") or {},
+                        "github_token": value.get("github_token"),
                     }
 
                 # DM channel IDs (D...) and raw channel IDs (C...) are not
@@ -290,13 +293,21 @@ class ClaudeHandler:
             cmd.extend(["--resume", resume])
         return cmd
 
-    async def _run_claude(self, cmd: list[str], prompt: str, cwd: str | None = None) -> str:
+    async def _run_claude(
+        self,
+        cmd: list[str],
+        prompt: str,
+        cwd: str | None = None,
+        github_token: str | None = None,
+    ) -> str:
         """Spawn a ``claude -p`` subprocess and return the response text."""
         env = os.environ.copy()
         # Strip tokens that must never be reachable by the Claude subprocess.
         # A prompt-injection attack could otherwise instruct Claude to exfiltrate them.
         for _key in ("CLAUDECODE", "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "ANTHROPIC_API_KEY"):
             env.pop(_key, None)
+        if github_token:
+            env["GH_TOKEN"] = github_token
 
         try:
             process = await asyncio.create_subprocess_exec(

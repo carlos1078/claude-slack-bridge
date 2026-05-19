@@ -10,5 +10,10 @@
 
   "C012AB3CD45": {
     "path": "/path/to/project"
+  },
+
+  "#org-b-channel": {
+    "path": "/path/to/org-b-project",
+    "github_token": "ghp_tokenForOrgB"
   }
 }
